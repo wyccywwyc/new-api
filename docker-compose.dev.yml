@@ -27,8 +27,9 @@ services:
     volumes:
       - dev_data:/data
     environment:
-      - SQL_DSN=postgresql://root:123456@postgres:5432/new-api
-      - REDIS_CONN_STRING=redis://redis
+      # - SQL_DSN=postgresql://root:123456@postgres:5432/new-api
+      - SQL_DSN=root:root@tcp(mysql8.0:3306)/new-api
+      - REDIS_CONN_STRING=redis://:123456@redis:6379
       - TZ=Asia/Shanghai
       - BATCH_UPDATE_ENABLED=true
       # Local HTTP dev mode: keep Secure=false and leave TRUSTED_URL unset. This disables the refresh/logout OriginGuard so the :5173 -> :3000 dev proxy works.
@@ -36,38 +37,53 @@ services:
       # For HTTPS only: set Secure=true and list every exact trusted HTTPS browser Origin. This does not configure relay CORS.
       # - SESSION_COOKIE_SECURE=true
       # - SESSION_COOKIE_TRUSTED_URL=https://example.com,https://admin.example.com
-    depends_on:
-      redis:
-        condition: service_started
-      postgres:
-        condition: service_healthy
+    # depends_on:
+    #   redis:
+    #     condition: service_started
+    #   postgres:
+    #     condition: service_healthy
     networks:
-      - dev-network
+      - ruoyi-network
 
-  redis:
-    image: redis:7-alpine
-    container_name: new-api-dev-redis
-    restart: unless-stopped
-    networks:
-      - dev-network
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: new-api-dev-redis
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev-network
 
-  postgres:
-    image: postgres:15-alpine
-    container_name: new-api-dev-pg
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: root
-      POSTGRES_PASSWORD: 123456
-      POSTGRES_DB: new-api
-    volumes:
-      - dev_pg_data:/var/lib/postgresql/data
-    networks:
-      - dev-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U root -d new-api"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: new-api-dev-pg
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: root
+  #     POSTGRES_PASSWORD: 123456
+  #     POSTGRES_DB: new-api
+  #   volumes:
+  #     - dev_pg_data:/var/lib/postgresql/data
+  #   networks:
+  #     - dev-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U root -d new-api"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+
+  # mysql:
+  # image: mysql:8.2
+  # container_name: new-api-dev-mysql
+  # restart: unless-stopped
+  # environment:
+  #   MYSQL_ROOT_PASSWORD: 123456
+  #   MYSQL_DATABASE: new-api
+  # networks:
+  #   - dev-network
+  # healthcheck:
+  #   test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p123456"]
+  #   interval: 5s
+  #   timeout: 3s
+  #   retries: 5
 
 volumes:
   dev_data:
@@ -76,3 +92,6 @@ volumes:
 networks:
   dev-network:
     driver: bridge
+  ruoyi-network:
+    driver: bridge
+    name: ruoyi-network
