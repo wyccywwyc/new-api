@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -25,9 +26,14 @@ import (
 )
 
 type ModelRequest struct {
-	Model string `json:"model"`
-	Group string `json:"group,omitempty"`
+	Model      string `json:"model"`
+	Group      string `json:"group,omitempty"`
+	ChannelIds []int  `json:"channel_ids,omitempty"`
 }
+
+// channelIDRoundRobinCounter is a global cursor for round-robin channel selection
+// over an explicit channel_ids list. All requests share this single counter.
+var channelIDRoundRobinCounter atomic.Int64
 
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
@@ -131,6 +137,19 @@ func Distribute() func(c *gin.Context) {
 					}
 				}
 
+				if channel == nil && len(modelRequest.ChannelIds) > 0 {
+					rrChannel, rrGroup, rrErr := selectChannelByRoundRobin(c, usingGroup, modelRequest.Model, c.Request.URL.Path, modelRequest.ChannelIds)
+					if rrErr != nil {
+						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+						return
+					}
+					channel = rrChannel
+					selectGroup = rrGroup
+					if usingGroup == "auto" {
+						common.SetContextKey(c, constant.ContextKeyAutoGroup, rrGroup)
+					}
+				}
+
 				if channel == nil {
 					channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
 						Ctx:         c,
@@ -183,6 +202,76 @@ func channelSupportsRequestPath(channel *model.Channel, requestPath string, requ
 	return config != nil && config.SupportsPathForModel(requestPath, requestModel)
 }
 
+// selectChannelByRoundRobin picks a channel from the given channelIDs list using a
+// global round-robin cursor. Candidates are validated: each must be enabled for the
+// model in the user's group (for "auto" group, in any of the user's auto groups),
+// still enabled, and support the request path. Invalid entries are skipped. The
+// returned selectGroup is the group the chosen channel belongs to (for "auto" it is
+// the matched auto group; otherwise it equals usingGroup).
+func selectChannelByRoundRobin(c *gin.Context, usingGroup, modelName, requestPath string, channelIDs []int) (*model.Channel, string, error) {
+	if len(channelIDs) == 0 {
+		return nil, "", errors.New("channel_ids list is empty")
+	}
+	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	isAuto := usingGroup == "auto"
+	var autoGroups []string
+	if isAuto {
+		autoGroups = service.GetUserAutoGroup(userGroup)
+		if len(autoGroups) == 0 {
+			return nil, "", fmt.Errorf("auto groups is not enabled")
+		}
+	}
+
+	type candidate struct {
+		channel *model.Channel
+		group   string
+	}
+	candidates := make([]candidate, 0, len(channelIDs))
+	seen := make(map[int]bool, len(channelIDs))
+	for _, id := range channelIDs {
+		if id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		var matchedGroup string
+		if isAuto {
+			found := false
+			for _, g := range autoGroups {
+				if model.IsChannelEnabledForGroupModel(g, modelName, id) {
+					matchedGroup = g
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		} else {
+			if !model.IsChannelEnabledForGroupModel(usingGroup, modelName, id) {
+				continue
+			}
+			matchedGroup = usingGroup
+		}
+		channel, err := model.CacheGetChannel(id)
+		if err != nil || channel == nil {
+			continue
+		}
+		if channel.Status != common.ChannelStatusEnabled {
+			continue
+		}
+		if !channelSupportsRequestPath(channel, requestPath, modelName) {
+			continue
+		}
+		candidates = append(candidates, candidate{channel: channel, group: matchedGroup})
+	}
+	if len(candidates) == 0 {
+		return nil, "", fmt.Errorf("no available channel in the specified channel_ids list for model %s in group %s", modelName, usingGroup)
+	}
+	idx := int(channelIDRoundRobinCounter.Add(1)-1) % len(candidates)
+	picked := candidates[idx]
+	return picked.channel, picked.group, nil
+}
+
 // getModelFromRequest 从请求中读取模型信息
 // 根据 Content-Type 自动处理：
 // - application/json
@@ -218,12 +307,16 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 		return nil, errors.New("invalid JSON request body")
 	}
 
-	values := gjson.GetManyBytes(requestBody, "model", "group")
+	values := gjson.GetManyBytes(requestBody, "model", "group", "channel_ids")
 	model, err := getJSONStringValue(values[0], "model")
 	if err != nil {
 		return nil, err
 	}
 	group, err := getJSONStringValue(values[1], "group")
+	if err != nil {
+		return nil, err
+	}
+	channelIds, err := getJSONIntSliceValue(values[2], "channel_ids")
 	if err != nil {
 		return nil, err
 	}
@@ -234,8 +327,9 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 	c.Request.Body = io.NopCloser(storage)
 
 	return &ModelRequest{
-		Model: model,
-		Group: group,
+		Model:      model,
+		Group:      group,
+		ChannelIds: channelIds,
 	}, nil
 }
 
@@ -247,6 +341,24 @@ func getJSONStringValue(result gjson.Result, field string) (string, error) {
 		return "", fmt.Errorf("field %s must be a string", field)
 	}
 	return result.String(), nil
+}
+
+func getJSONIntSliceValue(result gjson.Result, field string) ([]int, error) {
+	if !result.Exists() || result.Type == gjson.Null {
+		return nil, nil
+	}
+	if !result.IsArray() {
+		return nil, fmt.Errorf("field %s must be an array of integers", field)
+	}
+	arr := result.Array()
+	values := make([]int, 0, len(arr))
+	for i, item := range arr {
+		if !item.Exists() || item.Type != gjson.Number {
+			return nil, fmt.Errorf("field %s[%d] must be an integer", field, i)
+		}
+		values = append(values, int(item.Int()))
+	}
+	return values, nil
 }
 
 func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
@@ -349,6 +461,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			return nil, false, err
 		}
 		modelRequest.Model = req.Model
+		modelRequest.ChannelIds = req.ChannelIds
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/realtime") {
 		//wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01
@@ -406,6 +519,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		}
 		modelRequest.Model = req.Model
 		modelRequest.Group = req.Group
+		modelRequest.ChannelIds = req.ChannelIds
 		common.SetContextKey(c, constant.ContextKeyTokenGroup, modelRequest.Group)
 	}
 

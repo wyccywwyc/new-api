@@ -28,7 +28,7 @@ services:
       - dev_data:/data
     environment:
       # - SQL_DSN=postgresql://root:123456@postgres:5432/new-api
-      - SQL_DSN=root:root@tcp(mysql8.0:3306)/new-api
+      - SQL_DSN=root:123456@tcp(mysql:3306)/new-api
       - REDIS_CONN_STRING=redis://:123456@redis:6379
       - TZ=Asia/Shanghai
       - BATCH_UPDATE_ENABLED=true

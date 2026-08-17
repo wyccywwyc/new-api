@@ -44,6 +44,10 @@ export function buildChatCompletionPayload(
     stream: config.stream,
   }
 
+  if (config.channel_ids.length > 0) {
+    payload.channel_ids = config.channel_ids
+  }
+
   if (parameterEnabled.temperature) {
     payload.temperature = config.temperature
   }

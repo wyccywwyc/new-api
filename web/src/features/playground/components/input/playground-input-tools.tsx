@@ -44,6 +44,7 @@ import {
   getSearchActionNotice,
 } from '../../lib'
 import type { ParameterEnabled, PlaygroundConfig } from '../../types'
+import { PlaygroundChannelSelector } from './playground-channel-selector'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
 
 type PlaygroundInputToolsProps = {
@@ -155,6 +156,12 @@ export function PlaygroundInputTools({
           onConfigChange={onConfigChange}
           onParameterEnabledChange={onParameterEnabledChange}
           parameterEnabled={parameterEnabled}
+        />
+
+        <PlaygroundChannelSelector
+          config={config}
+          disabled={disabled}
+          onConfigChange={onConfigChange}
         />
 
         <Tooltip>

@@ -70,6 +70,7 @@ export interface ChatCompletionRequest {
   group?: string
   messages: ChatCompletionMessage[]
   stream: boolean
+  channel_ids?: number[]
   temperature?: number
   top_p?: number
   max_tokens?: number
@@ -119,6 +120,7 @@ export interface ChatCompletionResponse {
 export interface PlaygroundConfig {
   model: string
   group: string
+  channel_ids: number[]
   temperature: number
   top_p: number
   max_tokens: number
