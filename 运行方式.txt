@@ -1,3 +1,6 @@
+http://127.0.0.1:13011/dashboard/overview
+默认登录密码12345678
+
 本地运行docker-compose.dev.yml这个配置的new-api服务
 
 # 1.先启动本地电脑的docker服务
