@@ -1,1 +1,4 @@
 本地运行docker-compose.dev.yml这个配置的new-api服务
+
+docker build -t new-api:v1.0.1 .
+docker save -o D:\down\newapi-myself\new-api-v1.0.1.tar new-api:v1.0.1
