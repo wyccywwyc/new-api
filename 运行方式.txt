@@ -1,4 +1,14 @@
 本地运行docker-compose.dev.yml这个配置的new-api服务
 
+# 1.先启动本地电脑的docker服务
 docker build -t new-api:v1.0.1 .
-docker save -o D:\down\newapi-myself\new-api-v1.0.1.tar new-api:v1.0.1
+docker save -o D:\Docker\new-api\new-api-v1.0.1.tar new-api:v1.0.1
+
+# 2.将镜像复制到小新电脑的乌班图环境
+cp /mnt/d/docker/new-api/new-api-v1.0.1.tar ~/docker/new-api-self/new-api-v1.0.1.tar
+docker load -i ~/docker/new-api-self/new-api-v1.0.1.tar
+
+# 3.启动new-api服务
+docker compose up -d new-api
+
+
